@@ -1,0 +1,29 @@
+.build/
+.build-cache/
+DerivedData/
+*.xcuserstate
+.swiftpm/
+Package.resolved
+dist/
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode and local editor state
+.vscode/
+xcuserdata/
+
+# macOS application build products
+*.app/
+*.dSYM/
+
+# Swift and test output
+.coverage/
+*.swiftdoc
+*.swiftmodule
+*.swiftsourceinfo
+
+# Python build script caches
+__pycache__/
+*.pyc
