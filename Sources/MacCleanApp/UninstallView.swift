@@ -133,7 +133,11 @@ final class UninstallModel: ObservableObject {
             let deleted = Set(results.compactMap { if case let .deleted(url) = $0 { return url.standardizedFileURL }; return nil })
             associations.removeAll { deleted.contains($0.url.standardizedFileURL) }
             checked = checked.filter { !deleted.contains($0.standardizedFileURL) }
-            if deleted.contains(app.url.standardizedFileURL) { apps.removeAll { $0.url == app.url }; selected = nil }
+            if deleted.contains(app.url.standardizedFileURL) {
+                UninstallHistory.record(app.bundleIdentifier)
+                apps.removeAll { $0.url == app.url }
+                selected = nil
+            }
             let failures = results.compactMap { if case let .skipped(url, reason) = $0 { return "\(url.path)：\(reason)" }; return nil }
             message = "已删除 \(deleted.count) 项" + (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
             busy = false
@@ -263,19 +267,19 @@ struct UninstallView: View {
 
     private func associationSizeLabel(_ url: URL) -> String {
         guard let footprint = model.associationFootprints[url] else { return "正在计算空间…" }
-        let size = footprint.allocatedBytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: footprint.allocatedBytes, countStyle: .file)
+        let size = FileSizeFormatter.string(fromByteCount: footprint.allocatedBytes)
         return footprint.isComplete ? size : "至少 " + size + "（部分无法读取）"
     }
 
     private func totalSizeLabel(_ url: URL) -> String {
         guard let footprint = model.footprints[url] else { return "正在计算空间…" }
-        let size = footprint.allocatedBytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: footprint.allocatedBytes, countStyle: .file)
+        let size = FileSizeFormatter.string(fromByteCount: footprint.allocatedBytes)
         return footprint.isComplete ? size : "至少 " + size + "（部分无法读取）"
     }
 
     private func sizeLabel(_ url: URL) -> String {
         guard let footprint = model.applicationFootprints[url] else { return "正在计算空间…" }
-        let size = footprint.allocatedBytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: footprint.allocatedBytes, countStyle: .file)
+        let size = FileSizeFormatter.string(fromByteCount: footprint.allocatedBytes)
         return footprint.isComplete ? size : "至少 " + size + "（部分无法读取）"
     }
 

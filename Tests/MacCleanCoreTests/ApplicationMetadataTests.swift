@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import MacCleanCore
 
+@Test func zeroFileSizeUsesNumericZero() {
+    #expect(FileSizeFormatter.string(fromByteCount: 0) == "0 KB")
+}
+
 @Test func localizedApplicationNamesUsePreferredLanguageAndFallback() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }

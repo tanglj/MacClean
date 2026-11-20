@@ -62,10 +62,18 @@ public actor AuditLog {
 public struct DeletionEngine: Sendable {
     private let pathGuard: PathGuard
     private let auditLog: AuditLog
+    private let residualHome: URL
+    private let installed: @Sendable (String) -> Bool
 
     public init(pathGuard: PathGuard, auditLog: AuditLog) {
+        self.init(pathGuard: pathGuard, auditLog: auditLog, residualHome: FileManager.default.homeDirectoryForCurrentUser, installed: { OrphanApplicationScanner.isInstalled($0) })
+    }
+
+    init(pathGuard: PathGuard, auditLog: AuditLog, residualHome: URL, installed: @escaping @Sendable (String) -> Bool) {
         self.pathGuard = pathGuard
         self.auditLog = auditLog
+        self.residualHome = residualHome
+        self.installed = installed
     }
 
     public func execute(_ requests: [DeletionRequest], dryRun: Bool = false) async -> [DeletionResult] {
@@ -79,14 +87,27 @@ public struct DeletionEngine: Sendable {
                     continue
                 }
                 guard request.candidate.risk != .prohibited else { throw PathGuardError.prohibitedPath }
+                if request.candidate.ruleID == "app.orphan" {
+                    let owner = request.candidate.residualOwner
+                    let verifier = OrphanApplicationScanner(home: residualHome, history: UninstallHistory.identifiers, checkingOnly: owner, installed: installed)
+                    guard let currentOwner = verifier.owner(of: validated.path), owner == nil || currentOwner == owner, verifier.permits(validated), let stamp = request.candidate.residualStamp,
+                          ResidualFileStamp(validated) == stamp else {
+                        throw NSError(domain: "MacClean.Residual", code: 1, userInfo: [NSLocalizedDescriptionKey: "应用归属或文件状态已变化，请重新扫描。"])
+                    }
+                }
                 if dryRun {
                     results.append(.dryRun(validated))
                     try? await auditLog.append(AuditEvent(timestamp: Date(), operation: "delete", path: validated.path, ruleID: request.candidate.ruleID, risk: request.candidate.risk, result: "dry_run", detail: nil))
                 } else {
                     do {
-                        try FileManager.default.removeItem(at: validated)
+                        let isResidual = request.candidate.ruleID == "app.orphan"
+                        if isResidual {
+                            try FileManager.default.trashItem(at: validated, resultingItemURL: nil)
+                        } else {
+                            try FileManager.default.removeItem(at: validated)
+                        }
                         results.append(.deleted(validated))
-                        try? await auditLog.append(AuditEvent(timestamp: Date(), operation: "delete", path: validated.path, ruleID: request.candidate.ruleID, risk: request.candidate.risk, result: "deleted", detail: nil))
+                        try? await auditLog.append(AuditEvent(timestamp: Date(), operation: isResidual ? "trash" : "delete", path: validated.path, ruleID: request.candidate.ruleID, risk: request.candidate.risk, result: isResidual ? "trashed" : "deleted", detail: nil))
                     } catch {
                         guard request.candidate.ruleID == "app.uninstall",
                               validated.pathExtension.caseInsensitiveCompare("app") == .orderedSame,

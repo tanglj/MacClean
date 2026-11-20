@@ -29,7 +29,8 @@ public struct AppUninstaller: Sendable {
     public func inspect(appURL: URL, searchRoots: [URL]) -> (app: AppInfo, associations: [AppAssociation])? {
         guard let dictionary = NSDictionary(contentsOf: appURL.appendingPathComponent("Contents/Info.plist")) as? [String: Any],
               let bundleID = dictionary["CFBundleIdentifier"] as? String else { return nil }
-        let name = ApplicationMetadata.displayName(at: appURL, info: dictionary)
+        let name = ApplicationNameMapping.shared.displayName(for: bundleID)
+            ?? ApplicationMetadata.displayName(at: appURL, info: dictionary)
         let info = AppInfo(url: appURL, bundleIdentifier: bundleID, displayName: name, version: dictionary["CFBundleShortVersionString"] as? String)
         var results: [AppAssociation] = []
         // Platform words such as "mac" cannot establish application ownership.

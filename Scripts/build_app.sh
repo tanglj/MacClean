@@ -18,6 +18,10 @@ mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 /usr/bin/install -m 0755 "$binary_dir/MacCleanApp" "$app_dir/Contents/MacOS/MacClean"
 /usr/bin/install -m 0644 Resources/Info.plist "$app_dir/Contents/Info.plist"
 /usr/bin/install -m 0644 Resources/AppIcon.icns "$app_dir/Contents/Resources/AppIcon.icns"
+core_resource_bundle="$binary_dir/MacCleanCore_MacCleanCore.bundle"
+if [[ -d "$core_resource_bundle" ]]; then
+    /usr/bin/ditto "$core_resource_bundle" "$app_dir/Contents/Resources/MacCleanCore_MacCleanCore.bundle"
+fi
 if [[ -f Resources/Assets.car ]]; then
     /usr/bin/install -m 0644 Resources/Assets.car "$app_dir/Contents/Resources/Assets.car"
 fi

@@ -2,33 +2,57 @@ import Foundation
 
 public struct CandidateGroup: Identifiable, Sendable {
     public let directory: URL
+    public let locations: [URL]
     public let candidates: [ScanCandidate]
-    public var id: String { directory.path }
+    private let groupID: String
+    public var id: String { groupID }
     public let title: String
     public let size: Int64
     public let risk: RiskLevel
     public let categories: [String]
     public let tree: CandidateDirectory
 
-    init(directory: URL, candidates: [ScanCandidate], title: String? = nil) {
+    init(directory: URL, locations: [URL] = [], candidates: [ScanCandidate], title: String? = nil, groupID: String? = nil) {
         self.directory = directory
+        self.locations = locations.isEmpty ? [directory] : locations
         self.candidates = candidates
-        self.title = title ?? directory.lastPathComponent
+        self.groupID = groupID ?? directory.path
+        self.title = title ?? Self.defaultTitle(for: directory, candidates: candidates)
         tree = CandidateDirectory(url: directory, candidates: candidates)
         size = candidates.reduce(0) { $0 + $1.size }
         risk = candidates.map(\.risk).max { $0.rawValue < $1.rawValue } ?? .prohibited
         let names = Dictionary(uniqueKeysWithValues: RuleCatalog.builtInRules.map { ($0.id, $0.name) })
         categories = Set(candidates.map { names[$0.ruleID] ?? $0.ruleID }).sorted()
     }
+
+    private static func defaultTitle(for directory: URL, candidates: [ScanCandidate]) -> String {
+        guard candidates.allSatisfy({ $0.ruleID == "app.orphan" }) else {
+            return directory.lastPathComponent
+        }
+        let identifier = directory.lastPathComponent
+            .replacingOccurrences(of: ".binarycookies", with: "")
+            .replacingOccurrences(of: ".plist", with: "")
+            .replacingOccurrences(of: ".sqlite", with: "")
+            .replacingOccurrences(of: ".db", with: "")
+        let displayName = ApplicationNameMapping.shared.displayName(for: identifier) ?? identifier
+        return "疑似残留 · \(displayName)"
+    }
     public var impact: String {
+        if let first = candidates.first, first.ruleID == "app.orphan", let reason = first.evidence.first { return reason }
         if risk.requiresExplicitSelection { return "可能包含个人资料或需要重新下载的数据，请展开确认。" }
         return "缓存可能需要重新下载；删除日志后将无法查看对应的历史诊断记录。"
+    }
+
+    public var locationDescription: String {
+        locations.count == 1 ? locations[0].path : "多个位置（\(locations.count)）"
     }
 }
 
 public enum CandidateGrouping {
-    public static func groups(for candidates: [ScanCandidate]) -> [CandidateGroup] {
+    public static func groups(for candidates: [ScanCandidate], groupIDPrefix: String? = nil) -> [CandidateGroup] {
         let grouped = Dictionary(grouping: candidates) { candidate -> URL in
+            if candidate.ruleID == "app.orphan", let location = HomeLogSource.enclosingRoot(candidate.url) { return location.root }
+            if candidate.ruleID == "app.orphan", candidate.url.deletingLastPathComponent().lastPathComponent == "Preferences" { return candidate.url.standardizedFileURL }
             let parent = candidate.url.deletingLastPathComponent()
             let parts = parent.pathComponents
             guard let library = parts.firstIndex(of: "Library"), library + 1 < parts.count else { return parent }
@@ -37,9 +61,25 @@ public enum CandidateGrouping {
             return URL(fileURLWithPath: NSString.path(withComponents: Array(parts[...end])), isDirectory: true)
         }
         let nameResolver = CandidateApplicationNameResolver(directories: Array(grouped.keys))
-        let result = grouped.map { entry -> CandidateGroup in
-            let candidates = entry.value.sorted(by: candidateSort)
-            return CandidateGroup(directory: entry.key, candidates: candidates, title: nameResolver.title(for: entry.key))
+        let groupedByApplication = Dictionary(grouping: grouped) { entry in
+            if let owner = entry.value.first?.residualOwner, entry.value.allSatisfy({ $0.residualOwner == owner }) { return owner }
+            if let first = entry.value.first, first.ruleID == "app.orphan", let location = HomeLogSource.enclosingRoot(first.url) { return location.source.identifier }
+            return nameResolver.identity(for: entry.key) ?? "directory:\(entry.key.path)"
+        }
+        let result = groupedByApplication.map { identity, entries -> CandidateGroup in
+            let candidates = entries.flatMap(\.value).sorted(by: candidateSort)
+            let locations = entries.map(\.key).sorted { $0.path < $1.path }
+            let roots = candidates.map { candidate in
+                candidate.ruleID == "app.orphan" ? candidate.url : candidate.url.deletingLastPathComponent()
+            }
+            let directory = entries.count == 1
+                ? entries[0].key
+                : commonAncestor(of: roots) ?? locations[0]
+            let title = candidates.allSatisfy { $0.ruleID == "app.orphan" }
+                ? (HomeLogSource.all.first(where: { $0.identifier == identity })?.name ?? candidates.first?.residualOwner.map { ApplicationNameMapping.shared.displayName(for: $0) ?? $0 }).map { "疑似残留 · \($0)" }
+                : nameResolver.title(for: entries[0].key)
+            let groupID = groupIDPrefix.map { "\($0)|\(identity)" } ?? identity
+            return CandidateGroup(directory: directory, locations: locations, candidates: candidates, title: title, groupID: groupID)
         }
         return result.sorted(by: groupSort)
     }
@@ -53,6 +93,18 @@ public enum CandidateGrouping {
         if lhs.size != rhs.size { return lhs.size > rhs.size }
         return lhs.id < rhs.id
     }
+
+    private static func commonAncestor(of urls: [URL]) -> URL? {
+        guard let first = urls.first else { return nil }
+        var components = first.standardizedFileURL.pathComponents
+        for url in urls.dropFirst() {
+            let other = url.standardizedFileURL.pathComponents
+            let count = zip(components, other).prefix { $0 == $1 }.count
+            components = Array(components.prefix(count))
+            if components.isEmpty { return nil }
+        }
+        return URL(fileURLWithPath: NSString.path(withComponents: components), isDirectory: true)
+    }
 }
 
 private struct CandidateApplicationNameResolver {
@@ -64,6 +116,7 @@ private struct CandidateApplicationNameResolver {
     }
 
     private let applications: [InstalledApplication]
+    private let mapping = ApplicationNameMapping.shared
 
     init(directories: [URL]) {
         let homes = Set(directories.compactMap(Self.homeDirectory(for:)))
@@ -80,12 +133,30 @@ private struct CandidateApplicationNameResolver {
 
     func title(for directory: URL) -> String {
         let fallback = directory.lastPathComponent
+        if let bundleIdentifier = mapping.bundleIdentifier(matching: fallback),
+           let mappedName = mapping.name(for: bundleIdentifier) {
+            return mappedName
+        }
         guard let application = applications.first(where: { matches(fallback, application: $0) }) else { return fallback }
+        if let mappedName = mapping.name(for: application.bundleIdentifier) {
+            return mappedName
+        }
         return application.displayName ?? application.bundleName ?? application.fileName
+    }
+
+    func identity(for directory: URL) -> String? {
+        if let bundleIdentifier = mapping.bundleIdentifier(matching: directory.lastPathComponent) {
+            return bundleIdentifier.lowercased()
+        }
+        return applications.first(where: { matches(directory.lastPathComponent, application: $0) })?.bundleIdentifier.lowercased()
     }
 
     private func matches(_ directoryName: String, application: InstalledApplication) -> Bool {
         let normalized = Self.normalized(directoryName)
+        if let bundleIdentifier = mapping.bundleIdentifier(matching: directoryName),
+           Self.normalized(bundleIdentifier) == normalized {
+            return true
+        }
         let names = [application.bundleIdentifier, application.fileName, application.displayName, application.bundleName]
             .compactMap { $0 }
         if names.contains(where: { Self.normalized($0) == normalized }) { return true }

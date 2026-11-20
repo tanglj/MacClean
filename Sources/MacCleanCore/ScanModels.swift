@@ -9,9 +9,13 @@ public struct ScanCandidate: Codable, Hashable, Sendable, Identifiable {
     public let explanation: String
     public let evidence: [String]
     public let selectedByDefault: Bool
+    public let residualStamp: ResidualFileStamp?
+    public let residualOwner: String?
 
-    public init(id: UUID = UUID(), url: URL, size: Int64, ruleID: String, risk: RiskLevel, explanation: String, evidence: [String] = [], selectedByDefault: Bool? = nil) {
+    public init(id: UUID = UUID(), url: URL, size: Int64, ruleID: String, risk: RiskLevel, explanation: String, evidence: [String] = [], selectedByDefault: Bool? = nil, residualStamp: ResidualFileStamp? = nil, residualOwner: String? = nil) {
         self.id = id
+        self.residualStamp = residualStamp
+        self.residualOwner = residualOwner
         self.url = url
         self.size = size
         self.ruleID = ruleID

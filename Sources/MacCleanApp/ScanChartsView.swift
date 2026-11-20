@@ -11,7 +11,7 @@ struct ScanChartsView: View {
     private var selected: Int64 { selectedBytes }
     private var largest: [CandidateGroup] { Array(groups.prefix(5)) }
     private func size(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        FileSizeFormatter.string(fromByteCount: bytes)
     }
     private func label(_ group: CandidateGroup) -> String {
         group.directory.deletingLastPathComponent().lastPathComponent + "/" + group.title

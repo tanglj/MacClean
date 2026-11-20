@@ -188,7 +188,7 @@ final class DuplicateModel: ObservableObject {
                 if case let .skipped(url, reason) = result { return "\(url.path)：\(reason)" }; return nil
             }
             let deletedCount = results.count - failures.count
-            message = "已删除 \(deletedCount) 个重复文件，文件大小合计 " + ByteCountFormatter.string(fromByteCount: deletedSize, countStyle: .file)
+            message = "已删除 \(deletedCount) 个重复文件，文件大小合计 " + FileSizeFormatter.string(fromByteCount: deletedSize)
             isDeleting = false
         }
     }
@@ -217,7 +217,7 @@ struct DuplicateView: View {
             Button("取消", role: .cancel) {}
             Button("永久删除", role: .destructive) { model.confirmDelete() }
         } message: {
-            Text("将永久删除已勾选的 \(model.selectedCount) 个文件，共 \(ByteCountFormatter.string(fromByteCount: model.selectedSize, countStyle: .file))。此操作无法恢复。")
+            Text("将永久删除已勾选的 \(model.selectedCount) 个文件，共 \(FileSizeFormatter.string(fromByteCount: model.selectedSize))。此操作无法恢复。")
         }
     }
 
@@ -344,7 +344,7 @@ struct DuplicateView: View {
         }
     }
 
-    private func size(_ bytes: Int64) -> String { bytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+    private func size(_ bytes: Int64) -> String { FileSizeFormatter.string(fromByteCount: bytes) }
 }
 
 private struct DuplicateGroupRow: View, Equatable {
@@ -432,5 +432,5 @@ private struct DuplicateGroupRow: View, Equatable {
         NSWorkspace.shared.activateFileViewerSelecting([file.url])
     }
 
-    private func format(_ bytes: Int64) -> String { bytes == 0 ? "0 KB" : ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+    private func format(_ bytes: Int64) -> String { FileSizeFormatter.string(fromByteCount: bytes) }
 }

@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "MacCleanApp", targets: ["MacCleanApp"])
     ],
     targets: [
-        .target(name: "MacCleanCore"),
+        .target(name: "MacCleanCore", resources: [.process("Resources")]),
         .executableTarget(name: "MacCleanApp", dependencies: ["MacCleanCore"]),
         .testTarget(name: "MacCleanCoreTests", dependencies: ["MacCleanCore"])
     ]
