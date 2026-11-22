@@ -1,6 +1,6 @@
 import Foundation
 
-struct ResidualDiscovery {
+struct ResidualDiscovery: Sendable {
     let identifiers: Set<String>
     let ownersByDirectory: [String: String]
     let homeLogs: [HomeLogSource]

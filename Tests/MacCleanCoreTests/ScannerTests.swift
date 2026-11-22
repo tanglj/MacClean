@@ -19,6 +19,45 @@ import Testing
     #expect(report.candidates.allSatisfy { !$0.selectedByDefault && $0.size == 1 })
 }
 
+@Test func smartCleanupIncludesDeveloperCachesWithoutIncludingToolchains() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).standardizedFileURL
+    defer { try? FileManager.default.removeItem(at: home) }
+
+    let expected = [
+        ".npm/_cacache/content": "developer.package-caches",
+        ".npm/_npx/package/index": "developer.package-caches",
+        ".gradle/caches/modules-2/files-2.1/dependency.bin": "developer.package-caches",
+        ".gradle/wrapper/dists/gradle.zip": "developer.package-caches",
+        ".m2/repository/com/example/library.jar": "developer.package-caches",
+        "Library/Caches/pnpm/v12/store.json": "developer.package-caches",
+        "Library/pnpm/store/v3/files/package.tgz": "developer.package-caches",
+        ".cache/pip/http-v2/entry": "developer.package-caches",
+        ".cache/uv/archive-v0/entry": "developer.package-caches",
+        ".gem/specs/api.4.8.gz": "developer.package-caches"
+    ]
+    let excluded = [
+        ".pyenv/versions/3.12/bin/python",
+        ".nvm/versions/node/v20.0.0/bin/node",
+        ".rubies/ruby-3.4.1/bin/ruby",
+        ".gradle/gradle.properties",
+        ".npmrc"
+    ]
+    for path in Array(expected.keys) + excluded {
+        let file = home.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: file)
+    }
+
+    let report = Scanner(home: home, uninstallHistory: []).scan(ScanOptions.smartCleanup(home: home))
+    let homePath = home.resolvingSymlinksInPath().path
+    let actual = Dictionary(uniqueKeysWithValues: report.candidates.map {
+        let path = $0.url.resolvingSymlinksInPath().path
+        return (String(path.dropFirst(homePath.count + 1)), $0.ruleID)
+    })
+    #expect(actual == expected)
+    #expect(report.candidates.allSatisfy { !$0.selectedByDefault && $0.risk == .personalData })
+}
+
 @Test func scannerMatchesRulesAndSkipsSymlink() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let cache = root.appendingPathComponent("Library/Caches/App")

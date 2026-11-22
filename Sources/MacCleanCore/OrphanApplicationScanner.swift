@@ -43,7 +43,7 @@ struct HomeLogSource: Sendable {
     }
 }
 
-struct OrphanApplicationScanner {
+struct OrphanApplicationScanner: Sendable {
     private static let mainApplications: Set<String> = [
         "com.aone.keka", "com.colliderli.iina", "com.figma.Desktop", "com.fournova.Tower3",
         "com.github.GitHubClient", "com.googlecode.iterm2", "com.knollsoft.Rectangle",
@@ -55,9 +55,9 @@ struct OrphanApplicationScanner {
     private let discovery: ResidualDiscovery
     private let logOwners: [String: String]
 
-    init(home: URL, history: Set<String>, checkingOnly: String? = nil, installed: (String) -> Bool) {
+    init(home: URL, history: Set<String>, checkingOnly: String? = nil, installed: @Sendable (String) -> Bool, discovery: ResidualDiscovery? = nil) {
         self.home = home.standardizedFileURL
-        let discovery = ResidualDiscovery(home: home)
+        let discovery = discovery ?? ResidualDiscovery(home: home)
         self.discovery = discovery
         let sources = HomeLogSource.all + discovery.homeLogs
         logOwners = Dictionary(uniqueKeysWithValues: sources.map { ($0.directory, $0.identifier) })
@@ -80,7 +80,7 @@ struct OrphanApplicationScanner {
     }
 
     func owner(of path: String) -> String? {
-        guard !identifiers.isEmpty, let identifier = pathOwner(path), identifiers.contains(identifier) else { return nil }
+        guard !identifiers.isEmpty, let identifier = pathOwner(normalizedPath(path)), identifiers.contains(identifier) else { return nil }
         return identifier
     }
 
@@ -107,12 +107,27 @@ struct OrphanApplicationScanner {
 
     func permits(_ url: URL) -> Bool {
         guard owner(of: url.path) != nil else { return false }
-        let libraryPrefix = home.appendingPathComponent("Library").path + "/"
-        if !url.path.hasPrefix(libraryPrefix) { return true }
-        if url.path.hasPrefix(libraryPrefix + "Application Support/") { return true }
-        guard url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path + "/" == libraryPrefix else { return false }
+        let libraryPrefix = normalizedPath(home.appendingPathComponent("Library").path) + "/"
+        let path = normalizedPath(url.path)
+        if !path.hasPrefix(libraryPrefix) { return true }
+        if path.hasPrefix(libraryPrefix + "Application Support/") { return true }
+        guard normalizedPath(url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path) + "/" == libraryPrefix else { return false }
         let category = url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent
         return category == "Logs" ? url.pathExtension.lowercased() == "log" : ["cache", "tmp"].contains(url.pathExtension.lowercased())
+    }
+
+    func shouldTraverseDirectory(_ url: URL) -> Bool {
+        let supportRoot = normalizedPath(home.appendingPathComponent("Library/Application Support", isDirectory: true).path) + "/"
+        let path = normalizedPath(url.path)
+        guard path.hasPrefix(supportRoot) else { return true }
+        let relative = path.dropFirst(supportRoot.count)
+        guard !relative.contains("/") else { return true }
+        let name = relative.lowercased()
+        return discovery.ownersByDirectory[name] != nil || ["audacity", "cursor"].contains(name)
+    }
+
+    private func normalizedPath(_ path: String) -> String {
+        path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path
     }
 
     private static func supportOwner(directory: Substring, relativePath: Substring) -> String? {

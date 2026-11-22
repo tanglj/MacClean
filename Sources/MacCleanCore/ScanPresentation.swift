@@ -1,17 +1,19 @@
 import Foundation
 
 /// Built off the main thread when a scan changes, never during selection rendering.
-public struct ScanPresentation: Sendable {
+public final class ScanPresentation: @unchecked Sendable {
     public let candidates: [ScanCandidate]
     public let groups: [CandidateGroup]
     public let riskCounts: [RiskLevel: Int]
     public let candidatesByID: [UUID: ScanCandidate]
     public let directoryPathsByCandidateID: [UUID: [String]]
     public let groupByCandidateID: [UUID: String]
+    private let groupingContext: CandidateGroupingContext
     private let riskCandidates: [RiskLevel: [ScanCandidate]]
-    private let riskGroups: [RiskLevel: [CandidateGroup]]
     private let groupedResults: GroupedResults
-    private let riskGroupedResults: [RiskLevel: GroupedResults]
+    private var cachedRiskGroups: [RiskLevel: [CandidateGroup]] = [:]
+    private var cachedRiskResults: [RiskLevel: GroupedResults] = [:]
+    private let cacheLock = NSLock()
 
     public struct CleanupTypeGroup: Identifiable, Sendable {
         public let id: String
@@ -37,7 +39,7 @@ public struct ScanPresentation: Sendable {
             categories.first(where: { $0.id == "app.orphan" })?.groups ?? []
         }
 
-        fileprivate init(candidates: [ScanCandidate] = [], skippedPaths: [String] = []) {
+        fileprivate init(candidates: [ScanCandidate] = [], skippedPaths: [String] = [], groupingContext: CandidateGroupingContext? = nil) {
             let grouped = Dictionary(grouping: candidates, by: \.ruleID)
             var categories: [CleanupTypeGroup] = []
             var knownIDs = Set<String>()
@@ -66,7 +68,8 @@ public struct ScanPresentation: Sendable {
                     title: rule.name,
                     icon: Self.icon(for: rule.id),
                     explanation: rule.explanation,
-                    groups: CandidateGrouping.groups(for: candidates, groupIDPrefix: "type:\(rule.id)"),
+                    groups: groupingContext?.groups(for: candidates, groupIDPrefix: "type:\(rule.id)")
+                        ?? CandidateGrouping.groups(for: candidates, groupIDPrefix: "type:\(rule.id)"),
                     isUnavailable: false
                 ))
             }
@@ -78,7 +81,8 @@ public struct ScanPresentation: Sendable {
                     title: ruleID,
                     icon: "folder",
                     explanation: "按扫描规则归类的项目。",
-                    groups: CandidateGrouping.groups(for: candidates, groupIDPrefix: "type:\(ruleID)"),
+                    groups: groupingContext?.groups(for: candidates, groupIDPrefix: "type:\(ruleID)")
+                        ?? CandidateGrouping.groups(for: candidates, groupIDPrefix: "type:\(ruleID)"),
                     isUnavailable: false
                 ))
             }
@@ -92,6 +96,7 @@ public struct ScanPresentation: Sendable {
             case "browser.web-cache": return "globe"
             case "crash.reports", "user.logs": return "doc.text"
             case "user.caches": return "clock.arrow.circlepath"
+            case "developer.package-caches": return "shippingbox"
             case "developer.build-artifacts": return "hammer"
             case "app.orphan": return "archivebox"
             default: return "folder"
@@ -101,12 +106,13 @@ public struct ScanPresentation: Sendable {
 
     public init(candidates: [ScanCandidate], skippedPaths: [String] = []) {
         self.candidates = candidates
-        groups = CandidateGrouping.groups(for: candidates)
+        let groupingContext = CandidateGrouping.context(for: candidates)
+        self.groupingContext = groupingContext
+        let groupedResults = GroupedResults(candidates: candidates, skippedPaths: skippedPaths, groupingContext: groupingContext)
+        self.groupedResults = groupedResults
+        groups = groupingContext.groups(for: candidates)
         riskCandidates = Dictionary(grouping: candidates, by: \.risk)
         riskCounts = riskCandidates.mapValues(\.count)
-        riskGroups = riskCandidates.mapValues { CandidateGrouping.groups(for: $0) }
-        groupedResults = GroupedResults(candidates: candidates, skippedPaths: skippedPaths)
-        riskGroupedResults = riskCandidates.mapValues { GroupedResults(candidates: $0) }
         candidatesByID = Dictionary(candidates.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var paths: [UUID: [String]] = [:]
         for group in groups {
@@ -149,11 +155,35 @@ public struct ScanPresentation: Sendable {
     }
 
     public func groups(risk: RiskLevel?) -> [CandidateGroup] {
-        risk.map { riskGroups[$0] ?? [] } ?? groups
+        guard let risk else { return groups }
+        cacheLock.lock()
+        if let cached = cachedRiskGroups[risk] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let built = groupingContext.groups(for: riskCandidates[risk] ?? [])
+        cacheLock.lock()
+        cachedRiskGroups[risk] = built
+        cacheLock.unlock()
+        return built
     }
 
     public func results(risk: RiskLevel?) -> GroupedResults {
-        risk.map { riskGroupedResults[$0] ?? GroupedResults() } ?? groupedResults
+        guard let risk else { return groupedResults }
+        cacheLock.lock()
+        if let cached = cachedRiskResults[risk] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let built = GroupedResults(candidates: riskCandidates[risk] ?? [], groupingContext: groupingContext)
+        cacheLock.lock()
+        cachedRiskResults[risk] = built
+        cacheLock.unlock()
+        return built
     }
 }
 

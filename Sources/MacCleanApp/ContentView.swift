@@ -27,8 +27,12 @@ final class ScanViewModel: ObservableObject {
     var selectedSize: Int64 { selection.size }
     var groupedCandidates: [CandidateGroup] { presentation.groups(risk: selectedRisk) }
 
+    private var cleanupOptions: ScanOptions {
+        ScanOptions.smartCleanup()
+    }
+
     private var cleanupRoots: [URL] {
-        ScanOptions.smartCleanup().roots
+        cleanupOptions.roots
     }
 
     func toggleDirectory(_ directory: CandidateDirectory) {
@@ -60,10 +64,10 @@ final class ScanViewModel: ObservableObject {
         state = .scanning
         report = nil
         selection = ScanSelection()
-        let roots = cleanupRoots
+        let options = cleanupOptions
         scanTask = Task { [scanner] in
             let (result, prepared, initialSelection) = await Task.detached(priority: .userInitiated) {
-                let report = scanner.scan(ScanOptions(roots: roots))
+                let report = scanner.scan(options)
                 let prepared = ScanPresentation(candidates: report.candidates, skippedPaths: report.skippedPaths)
                 var initial = ScanSelection()
                 initial.set(report.candidates.filter(\.selectedByDefault), selected: true, in: prepared)
@@ -242,13 +246,13 @@ private struct Dashboard: View {
         VStack(spacing: 14) {
             Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 42)).foregroundStyle(.secondary)
             Text("还没有扫描结果").font(.title2.bold())
-            Text("扫描缓存、日志、废纸篓和已卸载应用残留。").foregroundStyle(.secondary)
+            Text("扫描应用缓存、开发工具缓存、日志、废纸篓和已卸载应用残留。").foregroundStyle(.secondary)
             Button("开始扫描") { model.startScan() }.buttonStyle(.borderedProminent)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var scanning: some View {
-        VStack(spacing: 16) { ProgressView().controlSize(.large); Text("正在扫描用户资源库…").font(.headline); Text("正在检查缓存、日志、废纸篓和已卸载应用残留").foregroundStyle(.secondary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 16) { ProgressView().controlSize(.large); Text("正在扫描用户资源库…").font(.headline); Text("正在检查应用缓存、开发工具缓存、日志、废纸篓和已卸载应用残留").foregroundStyle(.secondary) }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var results: some View {
